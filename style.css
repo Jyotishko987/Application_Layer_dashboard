@@ -51,10 +51,6 @@
     border-color: rgba(34,211,238,0.35);
     box-shadow: 0 0 18px rgba(34,211,238,0.18);
   }
-  .side-btn.deco{ opacity:0.28; cursor:default; }
-  .side-btn.deco:hover{ background:transparent; color:var(--muted); }
-  .side-sep{ width:26px; height:1px; background:var(--line); margin:8px 0; }
-
   /* -------- main -------- */
   .main{ flex:1; padding:26px 30px 60px; min-width:0; }
 
