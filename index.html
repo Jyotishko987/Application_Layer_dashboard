@@ -100,6 +100,20 @@
             <button class="btn-icon" id="btnReplay" title="Replay">&#8635;</button>
           </div>
         </div>
+        <div class="layer-stack" id="layerStack">
+          <div class="layer-box" data-layer="Application">
+            <span class="layer-name">Application</span>
+            <span class="layer-sub">DNS · HTTP · SMTP</span>
+          </div>
+          <div class="layer-box" data-layer="Transport">
+            <span class="layer-name">Transport</span>
+            <span class="layer-sub">TCP (handshake / data / teardown)</span>
+          </div>
+          <div class="layer-box active-always" data-layer="Network">
+            <span class="layer-name">Network</span>
+            <span class="layer-sub">IP addressing (every message)</span>
+          </div>
+        </div>
         <div class="progress-wrap">
           <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
           <div class="progress-label" id="progressLabel">0 / 0</div>
