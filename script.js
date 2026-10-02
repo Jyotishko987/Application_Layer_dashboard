@@ -12,6 +12,25 @@ function hl(t){ return '<span class="field-hl">'+t+'</span>'; }
 function esc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function fmtTime(ms){ return '+'+(ms/1000).toFixed(2)+'s'; }
 function randIp(){ return `${93+Math.floor(Math.random()*4)}.184.${Math.floor(Math.random()*255)}.${Math.floor(Math.random()*255)}`; }
+
+/* Real-world public IP ranges for well-known services (publicly documented via
+   ARIN/RDAP — the same info "whois" or "nslookup" would show). Used to make the
+   Browsing demo feel realistic; matched loosely by keyword in the hostname. */
+const KNOWN_SERVICES = [
+  { match: /facebook|instagram|whatsapp|meta\.com/i,   name: 'Meta',    ip: () => `157.240.${22+Math.floor(Math.random()*8)}.${Math.floor(Math.random()*255)}` },
+  { match: /youtube|google|gmail|ytimg/i,               name: 'Google',  ip: () => `142.250.${180+Math.floor(Math.random()*10)}.${Math.floor(Math.random()*255)}` },
+  { match: /netflix/i,                                  name: 'Netflix', ip: () => `45.57.${Math.floor(Math.random()*8)}.${Math.floor(Math.random()*255)}` },
+  { match: /amazon|aws\./i,                             name: 'Amazon',  ip: () => `52.94.${Math.floor(Math.random()*4)}.${Math.floor(Math.random()*255)}` },
+  { match: /wikipedia|wikimedia/i,                      name: 'Wikimedia', ip: () => `198.35.${26+Math.floor(Math.random()*2)}.${Math.floor(Math.random()*255)}` },
+  { match: /twitter|(^|\.)x\.com/i,                     name: 'X (Twitter)', ip: () => `104.244.42.${Math.floor(Math.random()*255)}` },
+  { match: /github/i,                                   name: 'GitHub',  ip: () => `140.82.${112+Math.floor(Math.random()*4)}.${Math.floor(Math.random()*255)}` },
+];
+/* Resolve a host to a realistic IP: a known service's real public range if the
+   hostname matches one, otherwise a random example IP like before. */
+function resolveIp(host){
+  const svc = KNOWN_SERVICES.find(s => s.match.test(host));
+  return svc ? { ip: svc.ip(), service: svc.name } : { ip: randIp(), service: null };
+}
 function randMac(){
   const h = () => Math.floor(Math.random()*256).toString(16).padStart(2,'0');
   return `${h()}:${h()}:${h()}:${h()}:${h()}:${h()}`.toUpperCase();
@@ -45,12 +64,34 @@ function pulseOrb(dir){
   orb.classList.add(dir === 'c2s' ? 'pulse-c2s' : 'pulse-s2c');
 }
 
+/* Highlight which layer of the stack this step belongs to: TCP = Transport,
+   everything else (DNS/HTTP/SMTP) = Application. Network stays subtly lit
+   throughout since every message carries simulated IP addressing. */
+function highlightLayer(proto){
+  const activeLayer = proto === 'TCP' ? 'Transport' : 'Application';
+  document.querySelectorAll('#layerStack .layer-box').forEach(box => {
+    box.classList.toggle('active', box.dataset.layer === activeLayer);
+  });
+}
+function resetLayerStack(){
+  document.querySelectorAll('#layerStack .layer-box').forEach(box => box.classList.remove('active'));
+}
+
 /* ---------------------------------------------------------------
    LEFT PANEL FORMS
 --------------------------------------------------------------- */
 const bodies = {
   browse: `
     <div class="field-row"><label>URL</label><input id="in-url" type="text" value="https://www.example.com/index.html"></div>
+    <div class="quick-tries" id="quickTries">
+      <span class="quick-label">Try:</span>
+      <button class="chip" data-url="https://www.facebook.com/">facebook.com</button>
+      <button class="chip" data-url="https://www.youtube.com/">youtube.com</button>
+      <button class="chip" data-url="https://www.google.com/">google.com</button>
+      <button class="chip" data-url="https://www.netflix.com/">netflix.com</button>
+      <button class="chip" data-url="https://www.wikipedia.org/">wikipedia.org</button>
+      <button class="chip" data-url="https://github.com/">github.com</button>
+    </div>
     <div class="btn-row"><button class="btn" id="runBrowse">Visit</button></div>
   `,
   mail: `
@@ -74,9 +115,9 @@ const bodies = {
 function renderMode(){
   document.getElementById('activityBody').innerHTML = bodies[mode];
   document.getElementById('protoTitle').textContent =
-    mode==='browse' ? 'Protocol Visualizer — DNS + HTTP' :
-    mode==='mail'   ? 'Protocol Visualizer — DNS + SMTP' :
-                      'Protocol Visualizer — DNS + HTTP (streaming)';
+    mode==='browse' ? 'Protocol Visualizer — DNS + TCP + HTTP' :
+    mode==='mail'   ? 'Protocol Visualizer — DNS + TCP + SMTP' :
+                      'Protocol Visualizer — DNS + TCP + HTTP (streaming)';
   wireModeButtons();
 }
 function wireModeButtons(){
@@ -84,6 +125,11 @@ function wireModeButtons(){
     document.getElementById('runBrowse').addEventListener('click', () => {
       const url = document.getElementById('in-url').value.trim() || 'https://www.example.com/';
       startRun(buildBrowseScenario(url));
+    });
+    document.querySelectorAll('#quickTries .chip').forEach(chip => {
+      chip.addEventListener('click', () => {
+        document.getElementById('in-url').value = chip.dataset.url;
+      });
     });
   }
   if(mode==='mail'){
@@ -124,21 +170,56 @@ document.querySelectorAll('.side-btn[data-mode]').forEach(btn => btn.addEventLis
 function domainFromUrl(url){ try{ return new URL(url).hostname; } catch(e){ return 'www.example.com'; } }
 function pathFromUrl(url){ try{ const u=new URL(url); return u.pathname+u.search||'/'; } catch(e){ return '/'; } }
 
+function randSeq(){ return Math.floor(Math.random()*4_000_000_000); }
+
+/* TCP 3-way handshake — every real TCP connection (HTTP, SMTP) does this
+   before any application data is sent. DNS runs over UDP, so it skips this. */
+function buildTcpHandshake(tBase, serverIp, serverPort, serverMac, clientPort){
+  const clientSeq = randSeq(), serverSeq = randSeq();
+  return [
+    withAddr({ proto:'TCP', t:tBase, bytes:54, title:'SYN', log:`Opening TCP connection to port ${serverPort}...`,
+      body:`Flags: ${hl('SYN')}\nSeq: ${clientSeq}\nClient → Server (3-way handshake, step 1/3)` }, 'c2s', serverIp, serverPort, serverMac, clientPort),
+    withAddr({ proto:'TCP', t:tBase+90, bytes:58, title:'SYN, ACK', log:`Server acknowledges, offers its own sequence`,
+      body:`Flags: ${hl('SYN, ACK')}\nSeq: ${serverSeq}\nAck: ${clientSeq+1}\nServer → Client (step 2/3)` }, 's2c', serverIp, serverPort, serverMac, clientPort),
+    withAddr({ proto:'TCP', t:tBase+150, bytes:54, title:'ACK', log:`Handshake complete — connection established`,
+      body:`Flags: ${hl('ACK')}\nSeq: ${clientSeq+1}\nAck: ${serverSeq+1}\nClient → Server (step 3/3)` }, 'c2s', serverIp, serverPort, serverMac, clientPort),
+  ];
+}
+
+/* TCP 4-way teardown — closes the connection cleanly after the application
+   protocol finishes (each side sends its own FIN, acknowledged by the other). */
+function buildTcpTeardown(tBase, serverIp, serverPort, serverMac, clientPort){
+  return [
+    withAddr({ proto:'TCP', t:tBase, bytes:54, title:'FIN, ACK', log:`Client requests connection close`,
+      body:`Flags: ${hl('FIN, ACK')}\nClient → Server (closing, step 1/4)` }, 'c2s', serverIp, serverPort, serverMac, clientPort),
+    withAddr({ proto:'TCP', t:tBase+70, bytes:54, title:'ACK', log:`Server acknowledges close request`,
+      body:`Flags: ${hl('ACK')}\nServer → Client (step 2/4)` }, 's2c', serverIp, serverPort, serverMac, clientPort),
+    withAddr({ proto:'TCP', t:tBase+130, bytes:54, title:'FIN, ACK', log:`Server closes its side`,
+      body:`Flags: ${hl('FIN, ACK')}\nServer → Client (step 3/4)` }, 's2c', serverIp, serverPort, serverMac, clientPort),
+    withAddr({ proto:'TCP', t:tBase+190, bytes:54, title:'ACK', log:`Connection fully closed`,
+      body:`Flags: ${hl('ACK')}\nClient → Server (step 4/4)` }, 'c2s', serverIp, serverPort, serverMac, clientPort),
+  ];
+}
+
 function buildBrowseScenario(url){
-  const host = domainFromUrl(url), path = pathFromUrl(url), ip = randIp();
+  const host = domainFromUrl(url), path = pathFromUrl(url);
+  const resolved = resolveIp(host), ip = resolved.ip;
   const isHttps = /^https:/i.test(url) || !/^http:/i.test(url); // default to https-style port if scheme omitted
   const httpPort = isHttps ? 443 : 80;
   const resolverIp = '192.168.1.1', resolverMac = randMac(), serverMac = randMac();
   const dnsClientPort = randPort(), httpClientPort = randPort();
+  const rangeNote = resolved.service ? `  (${resolved.service}'s real-world public IP range)` : '';
   return [
     withAddr({ proto:'DNS', t:0, bytes:42, title:'DNS Query', log:`Resolving ${host}...`,
       body:`Type: ${hl('A')}\nName: ${hl(host)}\nClient → Resolver (UDP/53)` }, 'c2s', resolverIp, 53, resolverMac, dnsClientPort),
     withAddr({ proto:'DNS', t:180, bytes:68, title:'DNS Response', log:`Resolved to server address`,
-      body:`${hl(host)}  A  ${hl(ip)}\nTTL: 300s\nResolver → Client` }, 's2c', resolverIp, 53, resolverMac, dnsClientPort),
-    withAddr({ proto:'HTTP', t:420, bytes:412, title:'HTTP GET Request', log:`Requesting ${path}`,
+      body:`${hl(host)}  A  ${hl(ip)}${rangeNote}\nTTL: 300s\nResolver → Client` }, 's2c', resolverIp, 53, resolverMac, dnsClientPort),
+    ...buildTcpHandshake(340, ip, httpPort, serverMac, httpClientPort),
+    withAddr({ proto:'HTTP', t:620, bytes:412, title:'HTTP GET Request', log:`Requesting ${path}`,
       body:`GET ${hl(path)} HTTP/1.1\nHost: ${host}\nUser-Agent: WiresideBrowser/1.0\nAccept: text/html,application/xhtml+xml\nConnection: keep-alive` }, 'c2s', ip, httpPort, serverMac, httpClientPort),
-    withAddr({ proto:'HTTP', t:780, bytes:4213, title:'HTTP Response', log:`Page loaded successfully`,
+    withAddr({ proto:'HTTP', t:980, bytes:4213, title:'HTTP Response', log:`Page loaded successfully`,
       body:`HTTP/1.1 ${hl('200 OK')}\nContent-Type: text/html; charset=UTF-8\nContent-Length: 4213\nServer: nginx\n\n&lt;html&gt;...page content...&lt;/html&gt;` }, 's2c', ip, httpPort, serverMac, httpClientPort),
+    ...buildTcpTeardown(1300, ip, httpPort, serverMac, httpClientPort),
   ];
 }
 
@@ -154,7 +235,8 @@ function buildMailScenario(to, subject, body){
       body:`Type: ${hl('MX')}\nName: ${hl(domain)}\nClient → Resolver` }, 'c2s', resolverIp, 53, resolverMac, dnsClientPort),
     withAddr({ proto:'DNS', t:150, bytes:66, title:'DNS Response (MX)', log:`Mail server found`,
       body:`${domain}  MX  10 ${hl('mail.'+domain)}\nMail Client → Resolver` }, 's2c', resolverIp, 53, resolverMac, dnsClientPort),
-    withAddr({ proto:'SMTP', t:380, bytes:90, title:'220 Service Ready', log:`Connecting to mail server...`,
+    ...buildTcpHandshake(220, mailIp, 25, mailMac, smtpClientPort),
+    withAddr({ proto:'SMTP', t:500, bytes:90, title:'220 Service Ready', log:`Connecting to mail server...`,
       body:`${hl('220')} mail.${domain} ESMTP ready` }, 's2c', mailIp, 25, mailMac, smtpClientPort),
     withAddr({ proto:'SMTP', t:560, bytes:40, title:'EHLO', log:`Handshake sent`,
       body:`${hl('EHLO')} myclient.edu` }, 'c2s', mailIp, 25, mailMac, smtpClientPort),
@@ -175,6 +257,7 @@ function buildMailScenario(to, subject, body){
       body:`${hl('250')} OK: queued as 8B3F1A2C` }, 's2c', mailIp, 25, mailMac, smtpClientPort),
     withAddr({ proto:'SMTP', t:2080, bytes:20, title:'QUIT', log:`Closing connection...`, body:`${hl('QUIT')}` }, 'c2s', mailIp, 25, mailMac, smtpClientPort),
     withAddr({ proto:'SMTP', t:2180, bytes:30, title:'221 Closing', log:`Connection closed. Mail sent.`, body:`221 Bye` }, 's2c', mailIp, 25, mailMac, smtpClientPort),
+    ...buildTcpTeardown(2320, mailIp, 25, mailMac, smtpClientPort),
   ];
 }
 
@@ -187,7 +270,8 @@ function buildStreamScenario(quality){
       body:`Type: ${hl('A')}\nName: ${hl(cdn)}` }, 'c2s', resolverIp, 53, resolverMac, dnsClientPort),
     withAddr({ proto:'DNS', t:150, bytes:68, title:'DNS Response', log:`CDN address resolved`,
       body:`${cdn}  A  ${hl(ip)}\nTTL: 60s` }, 's2c', resolverIp, 53, resolverMac, dnsClientPort),
-    withAddr({ proto:'HTTP', t:360, bytes:380, title:'GET Manifest', log:`Requesting stream manifest...`,
+    ...buildTcpHandshake(200, ip, 443, cdnMac, httpClientPort),
+    withAddr({ proto:'HTTP', t:480, bytes:380, title:'GET Manifest', log:`Requesting stream manifest...`,
       body:`GET ${hl('/video/master.m3u8')} HTTP/1.1\nHost: ${cdn}\nAccept: application/vnd.apple.mpegurl` }, 'c2s', ip, 443, cdnMac, httpClientPort),
     withAddr({ proto:'HTTP', t:640, bytes:300, title:'Manifest Response', log:`Manifest received (quality: ${quality})`,
       body:`HTTP/1.1 ${hl('200 OK')}\nContent-Type: application/vnd.apple.mpegurl\n\n#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=2500000,RESOLUTION=1280x720\n${hl(quality)}/index.m3u8` }, 's2c', ip, 443, cdnMac, httpClientPort),
@@ -199,6 +283,7 @@ function buildStreamScenario(quality){
       body:`GET ${hl('/video/'+quality+'/seg-002.ts')} HTTP/1.1\nHost: ${cdn}` }, 'c2s', ip, 443, cdnMac, httpClientPort),
     withAddr({ proto:'HTTP', t:1680, bytes:611820, title:'Segment 2 Response', log:`Segment 2 buffered — playback smooth`,
       body:`HTTP/1.1 ${hl('200 OK')}\nContent-Type: video/MP2T\nContent-Length: 611820` }, 's2c', ip, 443, cdnMac, httpClientPort),
+    ...buildTcpTeardown(1900, ip, 443, cdnMac, httpClientPort),
   ];
 }
 
@@ -230,6 +315,7 @@ function resetRun(){
   updateControls();
   setStatus('Idle. Choose an activity and run it.', false);
   document.getElementById('rightPanel').classList.remove('glow');
+  resetLayerStack();
 }
 
 function updateControls(){
@@ -252,7 +338,7 @@ function renderStep(i){
     <div class="step-meta"><div class="step-seq">#${i+1}</div><div class="step-time">${fmtTime(s.t)}</div></div>
     <div class="msg ${s.dir}">
       <div class="msg-head">
-        <span class="proto-tag">${s.proto}</span>
+        <span class="proto-tag ${s.proto==='TCP' ? 'tcp' : ''}">${s.proto}</span>
         <span class="dir-label">${s.dir==='c2s' ? '<b>Client</b> &rarr; Server' : 'Server &rarr; <b>Client</b>'}</span>
       </div>
       <div class="msg-title">${s.title}</div>
@@ -269,6 +355,7 @@ function renderStep(i){
   addAuditRow(s);
   addChartBar(i, s);
   pulseOrb(s.dir);
+  highlightLayer(s.proto);
 
   if(mode==='stream'){
     document.getElementById('streamBar').style.width = `${((i+1)/steps.length)*100}%`;
