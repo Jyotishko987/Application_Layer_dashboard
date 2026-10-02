@@ -2,7 +2,7 @@
 
 🔗 **Live Demo:** [jyotishko987.github.io/Application_Layer_dashboard](https://jyotishko987.github.io/Application_Layer_dashboard)
 
-!screenshot.jpeg](assets/screenshot.jpeg)
+![image](https://github.com/Jyotishko987/Application_Layer_dashboard/blob/11e0aa259af95486f344c9d5d74071742ae2ca72/screenshot.jpeg)
 
 Wireside is a dual-panel dashboard that lets you perform everyday internet activities — **Browsing**, **Mail**, and **Streaming** — while watching the exact protocol messages behind them play out step by step, across three network layers: **DNS/HTTP/SMTP** (Application), **TCP** (Transport), and simulated **IP/port/MAC** addressing (Network).
 
