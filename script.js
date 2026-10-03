@@ -77,6 +77,22 @@ function resetLayerStack(){
   document.querySelectorAll('#layerStack .layer-box').forEach(box => box.classList.remove('active'));
 }
 
+/* Clear both Application-layer and Transport-layer lanes together, since a
+   run spans both and they must stay visually in sync. */
+function clearLanes(showEmpty){
+  const emptyHtml = '<div class="empty-state">No activity running yet.</div>';
+  document.getElementById('timelineApp').innerHTML = showEmpty ? emptyHtml : '';
+  document.getElementById('timelineTransport').innerHTML = showEmpty ? emptyHtml : '';
+}
+function setView(view){
+  const split = document.getElementById('timelineSplit');
+  split.classList.remove('view-app','view-transport');
+  if(view==='app') split.classList.add('view-app');
+  if(view==='transport') split.classList.add('view-transport');
+  document.querySelectorAll('.view-btn').forEach(b => b.classList.toggle('active', b.dataset.view===view));
+}
+document.querySelectorAll('.view-btn').forEach(btn => btn.addEventListener('click', () => setView(btn.dataset.view)));
+
 /* ---------------------------------------------------------------
    LEFT PANEL FORMS
 --------------------------------------------------------------- */
@@ -176,28 +192,30 @@ function randSeq(){ return Math.floor(Math.random()*4_000_000_000); }
    before any application data is sent. DNS runs over UDP, so it skips this. */
 function buildTcpHandshake(tBase, serverIp, serverPort, serverMac, clientPort){
   const clientSeq = randSeq(), serverSeq = randSeq();
+  const clientWin = 64240, serverWin = 65535;
   return [
     withAddr({ proto:'TCP', t:tBase, bytes:54, title:'SYN', log:`Opening TCP connection to port ${serverPort}...`,
-      body:`Flags: ${hl('SYN')}\nSeq: ${clientSeq}\nClient → Server (3-way handshake, step 1/3)` }, 'c2s', serverIp, serverPort, serverMac, clientPort),
+      body:`Flags: ${hl('SYN')}\nSeq: ${clientSeq}\nWin: ${clientWin}\nLen: 0\nClient → Server (3-way handshake, step 1/3)` }, 'c2s', serverIp, serverPort, serverMac, clientPort),
     withAddr({ proto:'TCP', t:tBase+90, bytes:58, title:'SYN, ACK', log:`Server acknowledges, offers its own sequence`,
-      body:`Flags: ${hl('SYN, ACK')}\nSeq: ${serverSeq}\nAck: ${clientSeq+1}\nServer → Client (step 2/3)` }, 's2c', serverIp, serverPort, serverMac, clientPort),
+      body:`Flags: ${hl('SYN, ACK')}\nSeq: ${serverSeq}\nAck: ${clientSeq+1}\nWin: ${serverWin}\nLen: 0\nServer → Client (step 2/3)` }, 's2c', serverIp, serverPort, serverMac, clientPort),
     withAddr({ proto:'TCP', t:tBase+150, bytes:54, title:'ACK', log:`Handshake complete — connection established`,
-      body:`Flags: ${hl('ACK')}\nSeq: ${clientSeq+1}\nAck: ${serverSeq+1}\nClient → Server (step 3/3)` }, 'c2s', serverIp, serverPort, serverMac, clientPort),
+      body:`Flags: ${hl('ACK')}\nSeq: ${clientSeq+1}\nAck: ${serverSeq+1}\nWin: ${clientWin}\nLen: 0\nClient → Server (step 3/3)` }, 'c2s', serverIp, serverPort, serverMac, clientPort),
   ];
 }
 
 /* TCP 4-way teardown — closes the connection cleanly after the application
    protocol finishes (each side sends its own FIN, acknowledged by the other). */
 function buildTcpTeardown(tBase, serverIp, serverPort, serverMac, clientPort){
+  const win = 64240;
   return [
     withAddr({ proto:'TCP', t:tBase, bytes:54, title:'FIN, ACK', log:`Client requests connection close`,
-      body:`Flags: ${hl('FIN, ACK')}\nClient → Server (closing, step 1/4)` }, 'c2s', serverIp, serverPort, serverMac, clientPort),
+      body:`Flags: ${hl('FIN, ACK')}\nWin: ${win}\nLen: 0\nClient → Server (closing, step 1/4)` }, 'c2s', serverIp, serverPort, serverMac, clientPort),
     withAddr({ proto:'TCP', t:tBase+70, bytes:54, title:'ACK', log:`Server acknowledges close request`,
-      body:`Flags: ${hl('ACK')}\nServer → Client (step 2/4)` }, 's2c', serverIp, serverPort, serverMac, clientPort),
+      body:`Flags: ${hl('ACK')}\nWin: ${win}\nLen: 0\nServer → Client (step 2/4)` }, 's2c', serverIp, serverPort, serverMac, clientPort),
     withAddr({ proto:'TCP', t:tBase+130, bytes:54, title:'FIN, ACK', log:`Server closes its side`,
-      body:`Flags: ${hl('FIN, ACK')}\nServer → Client (step 3/4)` }, 's2c', serverIp, serverPort, serverMac, clientPort),
+      body:`Flags: ${hl('FIN, ACK')}\nWin: ${win}\nLen: 0\nServer → Client (step 3/4)` }, 's2c', serverIp, serverPort, serverMac, clientPort),
     withAddr({ proto:'TCP', t:tBase+190, bytes:54, title:'ACK', log:`Connection fully closed`,
-      body:`Flags: ${hl('ACK')}\nClient → Server (step 4/4)` }, 'c2s', serverIp, serverPort, serverMac, clientPort),
+      body:`Flags: ${hl('ACK')}\nWin: ${win}\nLen: 0\nClient → Server (step 4/4)` }, 'c2s', serverIp, serverPort, serverMac, clientPort),
   ];
 }
 
@@ -295,7 +313,7 @@ function startRun(scenario){
   steps = scenario;
   setStatus('Running — protocol exchange in progress...', true);
   document.getElementById('rightPanel').classList.add('glow');
-  document.getElementById('timeline').innerHTML = '';
+  clearLanes(false);
   document.getElementById('chartEmpty').style.display = 'none';
   document.getElementById('auditEmpty').style.display = 'none';
   updateControls();
@@ -307,8 +325,7 @@ function startRun(scenario){
 function resetRun(){
   stop();
   steps = []; stepIndex = -1;
-  document.getElementById('timeline').innerHTML =
-    '<div class="empty-state">No activity running yet. Run something on the left — the protocol exchange will appear here, one message at a time.</div>';
+  clearLanes(true);
   document.getElementById('auditList').innerHTML = '<div class="audit-empty" id="auditEmpty">Nothing logged yet.</div>';
   document.getElementById('chartSvg').innerHTML = '';
   document.getElementById('chartEmpty').style.display = 'block';
@@ -330,7 +347,8 @@ function updateControls(){
 
 function renderStep(i){
   const s = steps[i];
-  const el = document.getElementById('timeline');
+  const laneId = s.proto === 'TCP' ? 'timelineTransport' : 'timelineApp';
+  const el = document.getElementById(laneId);
   if(el.querySelector('.empty-state')) el.innerHTML = '';
   const wrap = document.createElement('div');
   wrap.className = 'step';
@@ -423,7 +441,7 @@ function stepForward(){
 function stepBackward(){
   if(stepIndex<=0) return;
   stop(); stepIndex--;
-  document.getElementById('timeline').innerHTML = '';
+  clearLanes(false);
   document.getElementById('auditList').innerHTML = '';
   document.getElementById('chartSvg').innerHTML = '';
   for(let i=0;i<=stepIndex;i++) renderStep(i);
@@ -444,7 +462,7 @@ function togglePlay(){
 function replay(){
   if(steps.length===0) return;
   stop(); stepIndex=-1;
-  document.getElementById('timeline').innerHTML = '';
+  clearLanes(false);
   document.getElementById('auditList').innerHTML = '';
   document.getElementById('chartSvg').innerHTML = '';
   if(mode==='stream') document.getElementById('streamBar').style.width='0%';
