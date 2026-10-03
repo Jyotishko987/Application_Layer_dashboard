@@ -2,7 +2,7 @@
 
 **🔗 Live Demo: [jyotishko987.github.io/Application_Layer_dashboard](https://jyotishko987.github.io/Application_Layer_dashboard/)**
 
-![image](screenshot.png)
+![image](https://github.com/Jyotishko987/Application_Layer_dashboard/blob/142b463ca0bc9b2f90c9af7648b0533503da0a28/screenshot.png)
 
 Wireside is a dual-panel dashboard that lets you perform everyday internet
 activities — **Browsing**, **Mail**, and **Streaming** — while watching the
