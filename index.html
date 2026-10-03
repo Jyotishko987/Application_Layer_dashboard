@@ -118,8 +118,24 @@
           <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
           <div class="progress-label" id="progressLabel">0 / 0</div>
         </div>
-        <div class="timeline" id="timeline">
-          <div class="empty-state">No activity running yet. Run something on the left — the protocol exchange will appear here, one message at a time.</div>
+        <div class="view-toggle" id="viewToggle">
+          <button class="view-btn active" data-view="both">Both (side-by-side)</button>
+          <button class="view-btn" data-view="app">Application Layer</button>
+          <button class="view-btn" data-view="transport">Transport Layer</button>
+        </div>
+        <div class="timeline-split" id="timelineSplit">
+          <div class="timeline-lane" id="laneApp" data-lane="app">
+            <div class="lane-head">Application Layer <span class="lane-sub">DNS · HTTP · SMTP</span></div>
+            <div class="timeline" id="timelineApp">
+              <div class="empty-state">No activity running yet.</div>
+            </div>
+          </div>
+          <div class="timeline-lane" id="laneTransport" data-lane="transport">
+            <div class="lane-head">Transport Layer <span class="lane-sub">TCP handshake · data · teardown</span></div>
+            <div class="timeline" id="timelineTransport">
+              <div class="empty-state">No activity running yet.</div>
+            </div>
+          </div>
         </div>
       </section>
     </div>
